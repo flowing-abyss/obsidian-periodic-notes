@@ -1,9 +1,9 @@
 {
   "id": "periodic-notes",
-  "name": "Periodic Notes (flowing-abyss)",
+  "name": "Periodic Notes",
   "description": "Create/manage your daily, weekly, and monthly notes",
   "version": "1.0.0",
-  "author": "Liam Cain",
+  "author": "Liam Cain (flowing-abyss)",
   "authorUrl": "https://github.com/liamcain/",
   "isDesktopOnly": false,
   "minAppVersion": "0.10.11"
