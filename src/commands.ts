@@ -84,7 +84,9 @@ async function openAdjacentNote(
     .clone()
     .add(offset, activeFileMeta.granularity);
 
-  plugin.openPeriodicNote(activeFileMeta.granularity, adjacentDate);
+  await plugin.openPeriodicNote(activeFileMeta.granularity, adjacentDate, {
+    calendarSet: activeFileMeta.calendarSet,
+  });
 }
 
 export function getCommands(

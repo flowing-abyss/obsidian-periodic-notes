@@ -88,7 +88,7 @@ class Suggest<T> {
     this.selectedItem = normalizedIndex;
 
     if (scrollIntoView) {
-      selectedSuggestion.scrollIntoView(false);
+      selectedSuggestion?.scrollIntoView(false);
     }
   }
 }
@@ -97,10 +97,12 @@ export abstract class TextInputSuggest<T> implements ISuggestOwner<T> {
   protected app: App;
   protected inputEl: HTMLInputElement;
 
-  private popper: PopperInstance;
+  private popper: PopperInstance | null = null;
   private scope: Scope;
   private suggestEl: HTMLElement;
   private suggest: Suggest<T>;
+  private handleInput = () => this.onInputChanged();
+  private handleBlur = () => this.close();
 
   constructor(app: App, inputEl: HTMLInputElement) {
     this.app = app;
@@ -113,9 +115,9 @@ export abstract class TextInputSuggest<T> implements ISuggestOwner<T> {
 
     this.scope.register([], "Escape", this.close.bind(this));
 
-    this.inputEl.addEventListener("input", this.onInputChanged.bind(this));
-    this.inputEl.addEventListener("focus", this.onInputChanged.bind(this));
-    this.inputEl.addEventListener("blur", this.close.bind(this));
+    this.inputEl.addEventListener("input", this.handleInput);
+    this.inputEl.addEventListener("focus", this.handleInput);
+    this.inputEl.addEventListener("blur", this.handleBlur);
     this.suggestEl.on("mousedown", ".suggestion-container", (event: MouseEvent) => {
       event.preventDefault();
     });
@@ -127,12 +129,17 @@ export abstract class TextInputSuggest<T> implements ISuggestOwner<T> {
 
     if (suggestions.length > 0) {
       this.suggest.setSuggestions(suggestions);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      this.open((<any>this.app).dom.appContainerEl, this.inputEl);
+      this.open(this.inputEl.ownerDocument.body, this.inputEl);
+    } else {
+      this.close();
     }
   }
 
   open(container: HTMLElement, inputEl: HTMLElement): void {
+    if (this.popper) {
+      void this.popper.update();
+      return;
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (<any>this.app).keymap.pushScope(this.scope);
 
@@ -163,12 +170,21 @@ export abstract class TextInputSuggest<T> implements ISuggestOwner<T> {
   }
 
   close(): void {
+    if (!this.popper) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (<any>this.app).keymap.popScope(this.scope);
 
     this.suggest.setSuggestions([]);
     this.popper.destroy();
+    this.popper = null;
     this.suggestEl.detach();
+  }
+
+  destroy(): void {
+    this.close();
+    this.inputEl.removeEventListener("input", this.handleInput);
+    this.inputEl.removeEventListener("focus", this.handleInput);
+    this.inputEl.removeEventListener("blur", this.handleBlur);
   }
 
   abstract getSuggestions(inputStr: string): T[];

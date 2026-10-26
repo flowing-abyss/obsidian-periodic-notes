@@ -1,11 +1,14 @@
 import { config } from "dotenv";
 import esbuild from "esbuild";
 import process from "process";
+import { createRequire } from "module";
+import path from "path";
 import builtins from "builtin-modules";
 import sveltePlugin from "esbuild-svelte";
 import sveltePreprocess from "svelte-preprocess";
 
-import manifest from "./manifest.json";
+const require = createRequire(import.meta.url);
+const manifest = require("./manifest.json");
 
 config();
 
@@ -20,7 +23,7 @@ let outdir = "./";
 if (!prod) {
   const vaultDir =
     process.env.REAL === "1" ? process.env.REAL_VAULT : process.env.TEST_VAULT;
-  outdir = `${vaultDir}.obsidian/plugins/${manifest.id}`;
+  if (vaultDir) outdir = path.join(vaultDir, ".obsidian", "plugins", manifest.id);
 }
 
 console.info(`\nSaving plugin to ${outdir}\n`);

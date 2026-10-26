@@ -1,3 +1,4 @@
+import cloneDeep from "lodash/cloneDeep";
 import type { Moment } from "moment";
 import { addIcon, Plugin, TFile } from "obsidian";
 import { writable, type Writable } from "svelte/store";
@@ -25,12 +26,9 @@ import {
   DEFAULT_PERIODIC_CONFIG,
 } from "./settings";
 import {
-  configureGlobalMomentLocale,
-  initializeLocaleConfigOnce,
-} from "./settings/localization";
-import {
   createNewCalendarSet,
   findStartupNoteConfig,
+  getLegacyDailyNoteSettings,
   hasLegacyDailyNoteSettings,
   setActiveSet,
 } from "./settings/utils";
@@ -42,6 +40,8 @@ import {
   applyTemplateTransformations,
   getNoteCreationPath,
   getTemplateContents,
+  getConfig,
+  getFormat,
   isMetaPressed,
 } from "./utils";
 
@@ -57,9 +57,11 @@ export default class PeriodicNotesPlugin extends Plugin {
   private cache: PeriodicNotesCache;
   public calendarSetManager: CalendarSetManager;
   private timelineManager: TimelineManager;
+  private pendingCreations = new Map<string, Promise<TFile>>();
+  private disposed = false;
 
-  unload(): void {
-    super.unload();
+  onunload(): void {
+    this.disposed = true;
     this.timelineManager?.cleanup();
   }
 
@@ -72,13 +74,10 @@ export default class PeriodicNotesPlugin extends Plugin {
 
     this.settings = writable<ISettings>();
     await this.loadSettings();
-    this.register(this.settings.subscribe(this.onUpdateSettings.bind(this)));
-
-    initializeLocaleConfigOnce(this.app);
 
     this.ribbonEl = null;
     this.calendarSetManager = new CalendarSetManager(this);
-    this.cache = new PeriodicNotesCache(this.app, this);
+    this.cache = this.addChild(new PeriodicNotesCache(this.app, this));
     this.timelineManager = new TimelineManager(this, this.cache);
 
     this.openPeriodicNote = this.openPeriodicNote.bind(this);
@@ -86,6 +85,7 @@ export default class PeriodicNotesPlugin extends Plugin {
     
     this.configureRibbonIcons();
     this.configureCommands();
+    this.register(this.settings.subscribe(this.onUpdateSettings.bind(this)));
 
     this.addCommand({
       id: "show-date-switcher",
@@ -112,6 +112,7 @@ export default class PeriodicNotesPlugin extends Plugin {
     });
 
     this.app.workspace.onLayoutReady(() => {
+      if (this.disposed) return;
       const startupNoteConfig = findStartupNoteConfig(this.settings);
       if (startupNoteConfig) {
         this.openPeriodicNote(startupNoteConfig.granularity, window.moment(), {
@@ -169,7 +170,7 @@ export default class PeriodicNotesPlugin extends Plugin {
 
   async loadSettings(): Promise<void> {
     const savedSettings = await this.loadData();
-    const settings = Object.assign({}, DEFAULT_SETTINGS, savedSettings || {});
+    const settings: ISettings = Object.assign(cloneDeep(DEFAULT_SETTINGS), savedSettings || {});
     this.settings.set(settings);
 
     if (!settings.calendarSets || settings.calendarSets.length === 0) {
@@ -181,9 +182,9 @@ export default class PeriodicNotesPlugin extends Plugin {
             migrateLegacySettingsToCalendarSet(settings)
           )
         );
-      } else if (hasLegacyDailyNoteSettings(app)) {
+      } else if (hasLegacyDailyNoteSettings(this.app)) {
         this.settings.update(
-          createNewCalendarSet(DEFAULT_CALENDARSET_ID, migrateDailyNoteSettings(settings))
+          createNewCalendarSet(DEFAULT_CALENDARSET_ID, migrateDailyNoteSettings(getLegacyDailyNoteSettings(this.app)))
         );
       } else {
         // otherwise create new default calendar set
@@ -197,11 +198,14 @@ export default class PeriodicNotesPlugin extends Plugin {
         );
       }
       this.settings.update(setActiveSet(DEFAULT_CALENDARSET_ID));
+    } else if (!settings.calendarSets.some((set) => set.id === settings.activeCalendarSet)) {
+      this.settings.update(setActiveSet(settings.calendarSets[0].id));
     }
   }
 
   private async onUpdateSettings(newSettings: ISettings): Promise<void> {
     await this.saveData(newSettings);
+    if (this.disposed) return;
     this.configureCommands();
     this.configureRibbonIcons();
 
@@ -213,10 +217,44 @@ export default class PeriodicNotesPlugin extends Plugin {
     granularity: Granularity,
     date: Moment
   ): Promise<TFile> {
-    const config = this.calendarSetManager.getActiveConfig(granularity);
-    const format = this.calendarSetManager.getFormat(granularity);
+    return this.createPeriodicNoteInCalendarSet(granularity, date, this.calendarSetManager.getActiveId());
+  }
+
+  private async createPeriodicNoteInCalendarSet(
+    granularity: Granularity,
+    date: Moment,
+    calendarSetId: string
+  ): Promise<TFile> {
+    const calendarSet = this.calendarSetManager.getCalendarSets().find((set) => set.id === calendarSetId);
+    if (!calendarSet) throw new Error(`Calendar set '${calendarSetId}' not found`);
+    if (!date.isValid()) throw new Error("Cannot create a periodic note for an invalid date");
+    const config = getConfig(calendarSet, granularity);
+    const format = getFormat(calendarSet, granularity);
     const filename = date.format(format);
-    const templateContents = await getTemplateContents(this.app, config.templatePath);
+    const destPath = await getNoteCreationPath(this.app, filename, config);
+    const existing = this.app.vault.getAbstractFileByPath(destPath);
+    if (existing instanceof TFile) return existing;
+    const pending = this.pendingCreations.get(destPath);
+    if (pending) return pending;
+
+    const creation = this.createPeriodicNoteFile(destPath, filename, granularity, date.clone(), format, config.templatePath);
+    this.pendingCreations.set(destPath, creation);
+    try {
+      return await creation;
+    } finally {
+      this.pendingCreations.delete(destPath);
+    }
+  }
+
+  private async createPeriodicNoteFile(
+    destPath: string,
+    filename: string,
+    granularity: Granularity,
+    date: Moment,
+    format: string,
+    templatePath: string | undefined
+  ): Promise<TFile> {
+    const templateContents = await getTemplateContents(this.app, templatePath);
     const renderedContents = applyTemplateTransformations(
       filename,
       granularity,
@@ -224,7 +262,8 @@ export default class PeriodicNotesPlugin extends Plugin {
       format,
       templateContents
     );
-    const destPath = await getNoteCreationPath(this.app, filename, config);
+    const existing = this.app.vault.getAbstractFileByPath(destPath);
+    if (existing instanceof TFile) return existing;
     return this.app.vault.create(destPath, renderedContents);
   }
 
@@ -279,7 +318,11 @@ export default class PeriodicNotesPlugin extends Plugin {
       date
     );
     if (!file) {
-      file = await this.createPeriodicNote(granularity, date);
+      file = await this.createPeriodicNoteInCalendarSet(
+        granularity,
+        date,
+        calendarSet ?? this.calendarSetManager.getActiveId()
+      );
     }
 
     const leaf = inNewSplit ? workspace.splitActiveLeaf() : workspace.getUnpinnedLeaf();

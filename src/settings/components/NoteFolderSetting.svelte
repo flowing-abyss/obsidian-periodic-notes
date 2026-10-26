@@ -26,7 +26,8 @@
 
   onMount(() => {
     error = validateFolder(app, inputEl.value);
-    new FolderSuggest(app, inputEl);
+    const suggest = new FolderSuggest(app, inputEl);
+    return () => suggest.destroy();
   });
 </script>
 

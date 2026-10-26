@@ -42,7 +42,7 @@ export function isLegacySettings(settings: unknown): settings is ILegacySettings
   );
 }
 
-export function migrateDailyNoteSettings(settings: ILegacySettings): CalendarSet {
+export function migrateDailyNoteSettings(settings: DailyNotesSettings): CalendarSet {
   const migrateConfig = (settings: DailyNotesSettings) => {
     return {
       enabled: true,
@@ -56,20 +56,20 @@ export function migrateDailyNoteSettings(settings: ILegacySettings): CalendarSet
   return {
     id: DEFAULT_CALENDARSET_ID,
     ctime: window.moment().format(),
-    day: migrateConfig(settings.daily),
+    day: migrateConfig(settings),
   };
 }
 
 export function migrateLegacySettingsToCalendarSet(
   settings: ILegacySettings
 ): CalendarSet {
-  const migrateConfig = (settings: ILegacySettings["daily"]) => {
+  const migrateConfig = (settings: ILegacySettings["daily"] | undefined) => {
     return {
-      enabled: settings.enabled,
-      format: settings.format || "",
-      folder: settings.folder || "",
+      enabled: settings?.enabled ?? false,
+      format: settings?.format || "",
+      folder: settings?.folder || "",
       openAtStartup: false,
-      templatePath: settings.template,
+      templatePath: settings?.template || "",
     } as PeriodicConfig;
   };
 

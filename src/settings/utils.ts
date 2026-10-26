@@ -18,6 +18,7 @@ const defaultPeriodicSettings = granularities.reduce((acc, g) => {
 type DeleteFunc = (calendarSetId: string) => Updater<ISettings>;
 export const deleteCalendarSet: DeleteFunc = (calendarSetId: string) => {
   return (settings: ISettings) => {
+    if (settings.calendarSets.length <= 1) return settings;
     const calendarSet = settings.calendarSets.find((c) => c.id === calendarSetId);
     if (calendarSet) {
       settings.calendarSets.remove(calendarSet);
@@ -106,7 +107,7 @@ export const wrapAround = (value: number, size: number): number => {
 };
 
 export function isDailyNotesPluginEnabled(app: App): boolean {
-  return app.internalPlugins.getPluginById("daily-notes").enabled;
+  return app.internalPlugins.getPluginById("daily-notes")?.enabled ?? false;
 }
 
 function getDailyNotesPlugin(app: App): DailyNotesPlugin | null {
@@ -139,6 +140,7 @@ export function getLegacyDailyNoteSettings(app: App): DailyNotesSettings {
     ...getDailyNotesPlugin(app)?.options,
   };
   return {
+    autorun: options.autorun,
     format: options.format,
     folder: options.folder?.trim(),
     template: options.template?.trim(),
@@ -146,7 +148,7 @@ export function getLegacyDailyNoteSettings(app: App): DailyNotesSettings {
 }
 
 export function disableDailyNotesPlugin(app: App): void {
-  app.internalPlugins.getPluginById("daily-notes").disable(true);
+  app.internalPlugins.getPluginById("daily-notes")?.disable(true);
 }
 
 export function getLocaleOptions() {

@@ -27,7 +27,8 @@
 
   onMount(() => {
     error = validateTemplate(app, inputEl.value);
-    new FileSuggest(app, inputEl);
+    const suggest = new FileSuggest(app, inputEl);
+    return () => suggest.destroy();
   });
 </script>
 

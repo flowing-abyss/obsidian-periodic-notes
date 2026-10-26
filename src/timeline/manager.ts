@@ -6,12 +6,12 @@ import type { SvelteComponent } from "svelte";
 import Timeline from "./Timeline.svelte";
 
 export default class TimelineManager {
-  private btnComponents: SvelteComponent[];
+  private btnComponents = new Map<MarkdownView, SvelteComponent>();
+  private disposed = false;
 
   constructor(readonly plugin: PeriodicNotesPlugin, readonly cache: PeriodicNotesCache) {
-    this.btnComponents = [];
-
     this.plugin.app.workspace.onLayoutReady(() => {
+      if (this.disposed) return;
       plugin.registerEvent(
         plugin.app.workspace.on("layout-change", this.onLayoutChange, this)
       );
@@ -20,12 +20,15 @@ export default class TimelineManager {
   }
 
   public cleanup() {
-    for (const existingEl of this.btnComponents) {
+    this.disposed = true;
+    for (const existingEl of this.btnComponents.values()) {
       existingEl.$destroy();
     }
+    this.btnComponents.clear();
   }
 
   private onLayoutChange(): void {
+    if (this.disposed) return;
     const openViews: MarkdownView[] = [];
     this.plugin.app.workspace.iterateAllLeaves((leaf) => {
       if (leaf.view instanceof MarkdownView) {
@@ -34,21 +37,18 @@ export default class TimelineManager {
     });
 
     // Clean up timelines on closed leaves
-    for (const existingEl of this.btnComponents) {
-      if (
-        !openViews
-          .map((view) => view.containerEl)
-          .includes(existingEl.$$.root as HTMLElement)
-      ) {
+    for (const [view, existingEl] of this.btnComponents) {
+      if (!openViews.includes(view)) {
         existingEl.$destroy();
+        this.btnComponents.delete(view);
       }
     }
 
     // Add to any view that doesn't already have one
     for (const view of openViews) {
-      const btn = this.btnComponents.find((btn) => btn.$$.root === view.containerEl);
-      if (!btn) {
-        this.btnComponents.push(
+      if (!this.btnComponents.has(view)) {
+        this.btnComponents.set(
+          view,
           new Timeline({
             target: view.containerEl,
             props: {

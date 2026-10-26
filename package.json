@@ -1,15 +1,16 @@
 {
   "name": "obsidian-periodic-notes",
-  "version": "0.0.17",
+  "version": "1.0.0",
   "description": "Create/manage daily, weekly, and monthly notes",
   "author": "liamcain",
   "main": "main.js",
   "license": "MIT",
   "scripts": {
-    "lint": "svelte-check && eslint . --ext .ts && tsc --noEmit",
-    "lint:fix": "svelte-check && eslint . --ext .ts --fix",
-    "dev": "node --experimental-json-modules esbuild.config.mjs",
-    "build": "yarn run lint && node --experimental-json-modules esbuild.config.mjs production",
+    "lint": "node scripts/check-svelte.cjs && eslint . --ext .ts && tsc --noEmit",
+    "lint:fix": "node scripts/check-svelte.cjs && eslint . --ext .ts --fix",
+    "dev": "node esbuild.config.mjs",
+    "build": "yarn run lint && node esbuild.config.mjs production",
+    "test": "node tests/run.mjs",
     "release": "standard-version"
   },
   "standard-version": {

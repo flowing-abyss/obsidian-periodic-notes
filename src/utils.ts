@@ -1,7 +1,6 @@
 import type { Moment } from "moment";
-import { normalizePath, App, Notice, Platform, TFile } from "obsidian";
+import { normalizePath, App, Notice, Platform } from "obsidian";
 
-import type { PeriodicNoteCachedMetadata } from "./cache";
 import { DEFAULT_FORMAT, HUMANIZE_FORMAT } from "./constants";
 import { DEFAULT_PERIODIC_CONFIG } from "./settings";
 import { removeEscapedCharacters } from "./settings/validation";
@@ -81,7 +80,7 @@ export function applyTemplateTransformations(
       /{{\s*(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\s*:(.*?)}}/gi,
       (_, dayOfWeek, momentFormat) => {
         const day = getDayOfWeekNumericalValue(dayOfWeek);
-        return date.weekday(day).format(momentFormat.trim());
+        return date.clone().weekday(day).format(momentFormat.trim());
       }
     );
   }
@@ -199,40 +198,19 @@ export function getConfig(
   return calendarSet[granularity] ?? DEFAULT_PERIODIC_CONFIG;
 }
 
-export async function applyPeriodicTemplateToFile(
-  app: App,
-  file: TFile,
-  calendarSet: CalendarSet,
-  metadata: PeriodicNoteCachedMetadata
-) {
-  const format = getFormat(calendarSet, metadata.granularity);
-  const templateContents = await getTemplateContents(
-    app,
-    calendarSet[metadata.granularity]?.templatePath
-  );
-  const renderedContents = applyTemplateTransformations(
-    file.basename,
-    metadata.granularity,
-    metadata.date,
-    format,
-    templateContents
-  );
-  return app.vault.modify(file, renderedContents);
-}
-
 export async function getTemplateContents(
   app: App,
   templatePath: string | undefined
 ): Promise<string> {
   const { metadataCache, vault } = app;
   const normalizedTemplatePath = normalizePath(templatePath ?? "");
-  if (templatePath === "/") {
+  if (!templatePath || templatePath === "/") {
     return Promise.resolve("");
   }
 
   try {
     const templateFile = metadataCache.getFirstLinkpathDest(normalizedTemplatePath, "");
-    return templateFile ? vault.cachedRead(templateFile) : "";
+    return templateFile ? await vault.cachedRead(templateFile) : "";
   } catch (err) {
     console.error(
       `Failed to read the daily note template '${normalizedTemplatePath}'`,
@@ -292,7 +270,12 @@ async function ensureFolderExists(app: App, path: string): Promise<void> {
   if (dirs.length) {
     const dir = join(...dirs);
     if (!app.vault.getAbstractFileByPath(dir)) {
-      await app.vault.createFolder(dir);
+      try {
+        await app.vault.createFolder(dir);
+      } catch (error) {
+        // Another note creation may have created the same directory meanwhile.
+        if (!app.vault.getAbstractFileByPath(dir)) throw error;
+      }
     }
   }
 }

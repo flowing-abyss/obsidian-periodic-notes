@@ -1,6 +1,5 @@
 import type { WeekSpec } from "moment";
 import { App } from "obsidian";
-import type { Writable } from "svelte/store";
 
 declare global {
   interface Window {

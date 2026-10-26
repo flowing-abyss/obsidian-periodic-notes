@@ -83,7 +83,7 @@
           .setIcon("x")
           .setDisabled(manager.getCalendarSets().length === 1)
           .onClick(() => {
-            deleteCalendarSet(selectedCalendarSet)($settings);
+            settings.update(deleteCalendarSet(selectedCalendarSet));
             router.navigate(["Periodic Notes"]);
           })
       )
@@ -92,17 +92,17 @@
 
   function focusEditableEl(el: HTMLDivElement) {
     el.focus();
-    const range = document.createRange();
+    const range = el.ownerDocument.createRange();
     range.selectNodeContents(el);
 
-    const selection = window.getSelection();
+    const selection = el.ownerDocument.defaultView?.getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
   }
 
   onMount(() => {
     setIcon(optionsEl, "more-vertical", 18);
-    document.getElementsByClassName("vertical-tab-content")[0].scroll(0, 0);
+    optionsEl.closest(".vertical-tab-content")?.scroll(0, 0);
 
     if ($router.eState["shouldRename"]) {
       focusEditableEl(nameEl);

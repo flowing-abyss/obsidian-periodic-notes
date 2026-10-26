@@ -1,9 +1,9 @@
-import memoize from "lodash/memoize";
 import sortBy from "lodash/sortBy";
 import type { Moment } from "moment";
 import {
   App,
   Component,
+  normalizePath,
   parseFrontMatterEntry,
   TAbstractFile,
   TFile,
@@ -16,7 +16,7 @@ import type PeriodicNotesPlugin from "./main";
 import { getLooselyMatchedDate } from "./parser";
 import { getDateInput } from "./settings/validation";
 import { granularities, type Granularity, type PeriodicConfig } from "./types";
-import { applyPeriodicTemplateToFile, getPossibleFormats } from "./utils";
+import { getPossibleFormats } from "./utils";
 
 export type MatchType = "filename" | "frontmatter" | "date-prefixed";
 
@@ -54,19 +54,27 @@ function getCanonicalDateString(_granularity: Granularity, date: Moment): string
   return date.toISOString();
 }
 
+function isInFolder(file: TFile, folder: string | undefined): boolean {
+  const path = normalizePath(folder || "/");
+  return path === "/" || path === "" || file.path.startsWith(`${path}/`);
+}
+
 export class PeriodicNotesCache extends Component {
   // Map the full filename to
   public cachedFiles: Map<string, Map<string, PeriodicNoteCachedMetadata>>;
+  private disposed = false;
 
   constructor(readonly app: App, readonly plugin: PeriodicNotesPlugin) {
     super();
     this.cachedFiles = new Map();
 
     this.app.workspace.onLayoutReady(() => {
+      if (this.disposed) return;
       console.info("[Periodic Notes] initializing cache");
       this.initialize();
       this.registerEvent(this.app.vault.on("create", this.resolve, this));
       this.registerEvent(this.app.vault.on("rename", this.resolveRename, this));
+      this.registerEvent(this.app.vault.on("delete", this.resolveDelete, this));
       this.registerEvent(
         this.app.metadataCache.on("changed", this.resolveChangedMetadata, this)
       );
@@ -76,6 +84,11 @@ export class PeriodicNotesCache extends Component {
     });
   }
 
+  onunload(): void {
+    this.disposed = true;
+    this.cachedFiles.clear();
+  }
+
   public reset(): void {
     console.info("[Periodic Notes] reseting cache");
     this.cachedFiles.clear();
@@ -83,37 +96,31 @@ export class PeriodicNotesCache extends Component {
   }
 
   public initialize(): void {
-    const memoizedRecurseChildren = memoize(
-      (rootFolder: TFolder, cb: (file: TAbstractFile) => void) => {
-        if (!rootFolder) return;
-        for (const c of rootFolder.children) {
-          if (c instanceof TFile) {
-            cb(c);
-          } else if (c instanceof TFolder) {
-            memoizedRecurseChildren(c, cb);
-          }
+    const visited = new Set<TFile>();
+    const recurseChildren = (rootFolder: TAbstractFile | null) => {
+      if (!(rootFolder instanceof TFolder)) return;
+      for (const c of rootFolder.children) {
+        if (c instanceof TFile && !visited.has(c)) {
+          visited.add(c);
+          this.resolve(c);
+          const metadata = this.app.metadataCache.getFileCache(c);
+          if (metadata) this.resolveChangedMetadata(c, "", metadata);
+        } else if (c instanceof TFolder) {
+          recurseChildren(c);
         }
       }
-    );
+    };
 
     for (const calendarSet of this.plugin.calendarSetManager.getCalendarSets()) {
       const activeGranularities = granularities.filter((g) => calendarSet[g]?.enabled);
       for (const granularity of activeGranularities) {
         const config = calendarSet[granularity] as PeriodicConfig;
         const rootFolder = this.app.vault.getAbstractFileByPath(
-          config.folder || "/"
-        ) as TFolder;
+          normalizePath(config.folder || "/")
+        );
 
         // Scan for filename matches
-        memoizedRecurseChildren(rootFolder, (file: TAbstractFile) => {
-          if (file instanceof TFile) {
-            this.resolve(file, "initialize");
-            const metadata = app.metadataCache.getFileCache(file);
-            if (metadata) {
-              this.resolveChangedMetadata(file, "", metadata);
-            }
-          }
-        });
+        recurseChildren(rootFolder);
       }
     }
   }
@@ -123,6 +130,12 @@ export class PeriodicNotesCache extends Component {
     _data: string,
     cache: CachedMetadata
   ): void {
+    if (file.extension !== "md") return;
+    const previous = this.find(file.path);
+    // Metadata may have been removed or changed. Rebuild the filename fallback
+    // before applying the current frontmatter.
+    for (const cache of this.cachedFiles.values()) cache.delete(file.path);
+    this.resolve(file);
     const manager = this.plugin.calendarSetManager;
     // Check if file matches any calendar set
     calendarsets: for (const calendarSet of manager.getCalendarSets()) {
@@ -130,8 +143,7 @@ export class PeriodicNotesCache extends Component {
       if (activeGranularities.length === 0) continue calendarsets;
 
       granularities: for (const granularity of activeGranularities) {
-        const folder = calendarSet[granularity]?.folder || "";
-        if (!file.path.startsWith(folder)) continue granularities;
+        if (!isInFolder(file, calendarSet[granularity]?.folder)) continue granularities;
         const frontmatterEntry = parseFrontMatterEntry(cache.frontmatter, granularity);
         if (!frontmatterEntry) continue granularities;
 
@@ -152,33 +164,50 @@ export class PeriodicNotesCache extends Component {
                 matchType: "frontmatter",
               },
             });
-          } else {
-            // TODO: custom format?
-            // semester:
-            //   start_date: X
-            //   end_date: Y
-            //
+            continue calendarsets;
           }
-
-          continue calendarsets;
         }
       }
     }
+    const metadata = this.find(file.path) ?? previous;
+    if (metadata) this.app.workspace.trigger("periodic-notes:resolve", metadata.granularity, file);
   }
 
   private resolveRename(file: TAbstractFile, oldPath: string): void {
-    for (const [, cache] of this.cachedFiles) {
-      if (file instanceof TFile) {
-        cache.delete(oldPath);
-        this.resolve(file, "rename");
+    if (file instanceof TFile) {
+      const previous = this.find(oldPath);
+      this.removePath(oldPath);
+      this.resolve(file);
+      const metadata = this.app.metadataCache.getFileCache(file);
+      if (metadata) this.resolveChangedMetadata(file, "", metadata);
+      if (previous) this.app.workspace.trigger("periodic-notes:resolve", previous.granularity, file);
+    } else if (file instanceof TFolder) {
+      for (const child of file.children) {
+        this.resolveRename(child, `${oldPath}/${child.name}`);
+      }
+      this.removePath(oldPath);
+    }
+  }
+
+  private removePath(path: string): void {
+    for (const cache of this.cachedFiles.values()) {
+      for (const filePath of cache.keys()) {
+        if (filePath === path || filePath.startsWith(`${path}/`)) cache.delete(filePath);
       }
     }
   }
 
-  private resolve(
-    file: TFile,
-    reason: "create" | "rename" | "initialize" = "create"
-  ): void {
+  private resolveDelete(file: TAbstractFile): void {
+    const previous = this.find(file.path);
+    if (file instanceof TFolder) {
+      for (const child of file.children) this.resolveDelete(child);
+    }
+    this.removePath(file.path);
+    if (previous) this.app.workspace.trigger("periodic-notes:resolve", previous.granularity, file);
+  }
+
+  private resolve(file: TAbstractFile): void {
+    if (!(file instanceof TFile) || file.extension !== "md") return;
     const manager = this.plugin.calendarSetManager;
 
     // Check if file matches any calendar set
@@ -193,8 +222,7 @@ export class PeriodicNotesCache extends Component {
       }
 
       granularities: for (const granularity of activeGranularities) {
-        const folder = calendarSet[granularity]?.folder || "";
-        if (!file.path.startsWith(folder)) continue granularities;
+        if (!isInFolder(file, calendarSet[granularity]?.folder)) continue granularities;
 
         const formats = getPossibleFormats(calendarSet, granularity);
         const dateInputStr = getDateInput(file, formats[0], granularity);
@@ -213,16 +241,14 @@ export class PeriodicNotesCache extends Component {
           } as PeriodicNoteCachedMetadata;
           this.set(calendarSet.id, file.path, metadata);
 
-          if (reason === "create" && file.stat.size === 0) {
-            applyPeriodicTemplateToFile(app, file, calendarSet, metadata);
-          }
-
           this.app.workspace.trigger("periodic-notes:resolve", granularity, file);
           continue calendarsets;
         }
       }
 
-      const nonStrictDate = getLooselyMatchedDate(file.basename);
+      const nonStrictDate = activeGranularities.some((g) => isInFolder(file, calendarSet[g]?.folder))
+        ? getLooselyMatchedDate(file.basename)
+        : null;
       if (nonStrictDate) {
         this.set(calendarSet.id, file.path, {
           calendarSet: calendarSet.id,
@@ -270,7 +296,8 @@ export class PeriodicNotesCache extends Component {
           cacheData.matchData.exact === true &&
           cacheData.date.isSame(targetDate, granularity)
         ) {
-          return this.app.vault.getAbstractFileByPath(filePath) as TFile;
+          const file = this.app.vault.getAbstractFileByPath(filePath);
+          if (file instanceof TFile) return file;
         }
       }
     }

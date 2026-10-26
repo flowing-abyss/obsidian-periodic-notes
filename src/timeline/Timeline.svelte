@@ -85,16 +85,19 @@
   }
 
   onMount(() => {
-    plugin.registerEvent(plugin.app.workspace.on("file-open", updateView));
-    plugin.registerEvent(
-      plugin.app.workspace.on("periodic-notes:resolve", updateView)
-    );
-    plugin.registerEvent(
+    const workspace = plugin.app.workspace;
+    const events = [
+      workspace.on("file-open", updateView),
+      workspace.on("periodic-notes:resolve", updateView),
       plugin.app.workspace.on(
         "periodic-notes:settings-updated",
-        updateComplicationVisibility
-      )
-    );
+        () => {
+          updateComplicationVisibility();
+          updateView();
+        }
+      ),
+    ];
+    return () => events.forEach((event) => workspace.offref(event));
   });
 </script>
 

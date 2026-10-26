@@ -1,5 +1,22 @@
 # Periodic Notes ⌚
 
+This maintenance fork targets **1.0.0**, keeping the plugin ID, public note API,
+commands, calendar sets, and saved settings compatible. It fixes Timeline errors
+and resource cleanup, stale note caches after edits and moves, concurrent note
+creation, calendar-set selection, settings migration, and template handling.
+Templates are applied when the plugin creates a note, preserving 1.0.0 behavior.
+
+To build with Node.js 18 or newer:
+
+```sh
+yarn install --immutable
+yarn test
+yarn build
+```
+
+Install `main.js`, `styles.css`, and `manifest.json` into the existing
+`.obsidian/plugins/periodic-notes/` directory, keeping its `data.json`.
+
 The Periodic Notes plugin expands on the idea of daily notes and introduces weekly and monthly notes.
 
 ## Weekly Notes

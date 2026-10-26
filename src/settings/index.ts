@@ -31,7 +31,7 @@ export interface ISettings {
 
 export const DEFAULT_SETTINGS: ISettings = {
   // Onboarding
-  installedVersion: "1.0.0-beta3",
+  installedVersion: "1.0.0",
   showGettingStartedBanner: true,
   hasMigratedDailyNoteSettings: false,
   hasMigratedWeeklyNoteSettings: false,
@@ -40,10 +40,6 @@ export const DEFAULT_SETTINGS: ISettings = {
   activeCalendarSet: DEFAULT_CALENDARSET_ID,
   calendarSets: [],
   enableTimelineComplication: true,
-
-  // Localization
-  localeOverride: "system-default",
-  weekStart: "locale" as IWeekStartOption,
 };
 
 export const DEFAULT_PERIODIC_CONFIG: PeriodicConfig = Object.freeze({
@@ -56,7 +52,7 @@ export const DEFAULT_PERIODIC_CONFIG: PeriodicConfig = Object.freeze({
 });
 
 export class PeriodicNotesSettingsTab extends PluginSettingTab {
-  private view: SvelteComponent;
+  private view: SvelteComponent | null = null;
 
   constructor(readonly app: App, readonly plugin: WeeklyNotesPlugin) {
     super(app, plugin);
@@ -64,6 +60,8 @@ export class PeriodicNotesSettingsTab extends PluginSettingTab {
   }
 
   display(): void {
+    this.view?.$destroy();
+    this.view = null;
     this.containerEl.empty();
 
     this.view = new SettingsRouter({
@@ -78,6 +76,7 @@ export class PeriodicNotesSettingsTab extends PluginSettingTab {
 
   hide() {
     super.hide();
-    this.view.$destroy();
+    this.view?.$destroy();
+    this.view = null;
   }
 }
