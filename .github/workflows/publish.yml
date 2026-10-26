@@ -42,12 +42,6 @@ jobs:
       - name: Build
         run: node .yarn/releases/yarn-berry.cjs build
 
-      - name: Package plugin
-        run: |
-          mkdir periodic-notes
-          cp main.js manifest.json styles.css LICENSE periodic-notes/
-          zip -r "periodic-notes-$GITHUB_REF_NAME.zip" periodic-notes
-
       - name: Publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -58,5 +52,5 @@ jobs:
             --draft \
             --title "$GITHUB_REF_NAME" \
             --notes-file ".github/release-notes/$GITHUB_REF_NAME.md" \
-            "periodic-notes-$GITHUB_REF_NAME.zip" main.js manifest.json styles.css
+            main.js manifest.json styles.css
           gh release edit "$GITHUB_REF_NAME" --draft=false --latest
